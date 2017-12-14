@@ -1,6 +1,7 @@
-import numpy as np
 import tensorflow as tf
-
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 
 def load_mnist_images(binarize=True):
     """
@@ -21,27 +22,136 @@ def load_mnist_images(binarize=True):
 
 class VariationalAutoencoder(object):
 
-    def lower_bound(self, x):
-        """
-        :param x: A (n_samples, n_dim) array of data points
-        :return: A (n_samples, ) array of the lower-bound on the log-probability of each data point
-        """
-        raise NotImplementedError()
+    def __init__(self,encoder_hidden_sizes, decoder_hidden_sizes,z_dim):
 
+        self.ELBO = 0.0
+        self.z_dim = z_dim
+        self.weight_initializer = tf.variance_scaling_initializer()
+        self.encoder_dims = np.append(784, encoder_hidden_sizes)
+        self.decoder_dims = np.append(self.z_dim, decoder_hidden_sizes)
 
-    def mean_x_given_z(self, z):
-        """
-        :param z: A (n_samples, n_dim_z) tensor containing a set of latent data points (n_samples, n_dim_z)
-        :return: A (n_samples, n_dim_x) tensor containing the mean of p(X|Z=z) for each of the given points
-        """
-        raise NotImplementedError()
+    def _linear_layer(self, x, kernel_lower_dim, kernel_upper_dim, scope=None):
 
-    def sample(self, n_samples):
+        with tf.variable_scope(scope or 'linear', reuse=tf.AUTO_REUSE):
+            w = tf.get_variable(
+                name='w',
+                shape=[kernel_lower_dim, kernel_upper_dim],
+                dtype=tf.float32,
+                initializer=self.weight_initializer,
+            )
+
+            b = tf.get_variable(
+                name='b',
+                shape=[kernel_upper_dim],
+                dtype=tf.float32,
+                initializer=tf.constant_initializer(0.0)
+            )
+
+        return tf.add(tf.matmul(x, w), b)
+
+    def encoder(self, x):
+
+        layer_input = x
+        last_upper_dim = 0
+
+        for idx, (lower_dim, upper_dim) in enumerate(zip(self.encoder_dims[:-1], self.encoder_dims[1:])):
+            kernel_upper_dim = upper_dim
+            kernel_lower_dim = lower_dim
+            layer_name = 'encoder_' + str(idx)
+
+            layer_output = tf.nn.dropout(tf.nn.relu(self._linear_layer(
+                layer_input, kernel_lower_dim, kernel_upper_dim, layer_name)), keep_prob=1)
+
+            layer_input = layer_output
+            last_upper_dim = kernel_upper_dim
+
+        # Output for Last Layer
+
+        enc_mu = self._linear_layer(layer_input, last_upper_dim, self.z_dim, 'enc_mu')
+        enc_logsd = self._linear_layer(layer_input, last_upper_dim, self.z_dim, 'enc_logsd')
+
+        return enc_mu, enc_logsd
+
+    def decoder(self, z):
+
+        layer_input = z
+        last_upper_dim = 0
+
+        for idx, (lower_dim, upper_dim) in enumerate(zip(self.decoder_dims[:-1], self.decoder_dims[1:])):
+            kernel_upper_dim = upper_dim
+            kernel_lower_dim = lower_dim
+            layer_name = 'decoder_' + str(idx)
+
+            layer_output = tf.nn.dropout(tf.nn.relu(self._linear_layer(
+                layer_input, kernel_lower_dim, kernel_upper_dim, layer_name)), keep_prob=1)
+
+            layer_input = layer_output
+            last_upper_dim = kernel_upper_dim
+
+        # Output for Last Layer
+
+        dec_mu = self._linear_layer(layer_input, last_upper_dim, 784, 'dec_mu')
+
+        return dec_mu
+
+    def inference_network(self, x):
+
+        enc_mu, enc_logsd = self.encoder(x)
+
+        # Sample Epsilon. This is sampled from a standard gaussian and then multiplied with the mu and sigma
+        # obtained from the encoder. Same shape as encoder-predicted standard deviation.
+
+        epsilon = tf.random_normal(tf.shape(enc_logsd), name='epsilon')
+        encoder_distrib = tf.exp(.5 * enc_logsd)
+
+        # Sample Mu. From re-parameterization trick
+        z = enc_mu + tf.multiply(encoder_distrib, epsilon)
+
+        # Begin Decoding with sampled 'z'
+
+        x_hat = self.decoder(z)
+        #dec_mu = self.decoder(z)
+        #dist = tf.distributions.Bernoulli(probs=dec_mu)
+        #x_hat = dist.sample()
+
+        KLD = -.5 * tf.reduce_sum(1. + enc_logsd - tf.pow(enc_mu, 2) - tf.exp(enc_logsd), reduction_indices=1)
+        CE_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits = x_hat, labels = x), reduction_indices=1)
+
+        self.ELBO = -tf.reduce_mean(KLD + CE_loss)
+        return x_hat, self.ELBO
+
+    def train_step(self, learning_rate, lower_bound):
+
+        train_op = tf.train.AdamOptimizer(learning_rate).minimize(-self.ELBO)
+        return train_op
+
+    def sample(self, n_samples, idx):
         """
         :param n_samples: Generate N samples from your model
         :return: A (n_samples, n_dim) array where n_dim is the dimenionality of your input
         """
-        raise NotImplementedError()
+        sampled_latent_variables = list()
+
+        for n in range(n_samples):
+            # Sample a random latent state
+            z = tf.random_normal(shape=[1,2])
+            sampled_latent_variables.append(z)
+
+            # Extract Bernoulli Pixel distribution for sampled latent variable.
+            dec_mu = self.decoder(z)
+
+            dist = tf.distributions.Bernoulli(logits=dec_mu)
+            sample = dist.sample()
+            plt.subplot(4, 4, n + 1)
+            plt.text(
+                0, 1, sampled_latent_variables[n], color='black', backgroundcolor='white', fontsize=8)
+            plt.imshow(tf.reshape(sample, shape=[28,28]).eval(), cmap='gray')
+            plt.axis('off')
+
+        plt.savefig('./VAE_%s.png' % str(idx))
+        plt.close()
+
+        return
 
 
 def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer = 'adam',  learning_rate=0.001, n_epochs=4000,
@@ -70,20 +180,36 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer =
     n_samples, n_dims = x_train.shape
     x_minibatch = train_iterator.get_next()  # Get symbolic data, target tensors
 
-    # Build Model
-    raise NotImplementedError("Build the model here")
+    # Build the model
+    vae = VariationalAutoencoder(encoder_hidden_sizes=encoder_hidden_sizes,
+                                 decoder_hidden_sizes=decoder_hidden_sizes,
+                                 z_dim=z_dim)
 
+    # Build Graph
+    train_loss, train_ELBO = vae.inference_network(x_minibatch)
+    train_step = vae.train_step(learning_rate, train_ELBO)
 
     with tf.Session() as sess:
-        sess.run(train_iterator.initializer)  # Initialize the variables of the data-loader.
-        sess.run(tf.global_variables_initializer())  # Initialize the model parameters.
-        n_steps = (n_epochs * n_samples)/minibatch_size
-        for i in xrange(n_steps):
-            if i%test_every==0:
-                raise NotImplementedError('INSERT CODE TO RUN TEST AND RECORD LOG-PROB PERIODICALLY')
 
-            raise NotImplementedError('CALL TRAINING FUNCTION HERE')
+        sess.run(train_iterator.initializer)
+        sess.run(tf.global_variables_initializer())
+        n_steps = (n_epochs * n_samples) / minibatch_size
+        loss_list = list()
 
+        for i in range(int(n_steps)):
+
+            _, tr_loss = sess.run([train_step, train_ELBO])
+            if i % test_every == 0:
+                # Determine Test Loss
+                #te_loss = sess.run([test_loss])
+                te_loss = 0.0
+                print("[{}] Train Step {:04d}/{:04d}, Batch Size = {}, ELBO = {} , Test Loss = {}"
+                      .format(datetime.now().strftime("%Y-%m-%d %H:%M"), i + 1,
+                              int(n_steps), minibatch_size, tr_loss, te_loss))
+
+
+                # Sample outputs
+                vae.sample(16, i)
 
 if __name__ == '__main__':
     train_vae_on_mnist()
