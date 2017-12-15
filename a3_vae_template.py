@@ -26,6 +26,7 @@ class VariationalAutoencoder(object):
 
         self.ELBO = 0.0
         self.z_dim = z_dim
+        self.batch_size = 0
         self.weight_initializer = tf.variance_scaling_initializer()
         self.encoder_dims = np.append(784, encoder_hidden_sizes)
         self.decoder_dims = np.append(self.z_dim, decoder_hidden_sizes)
@@ -53,6 +54,7 @@ class VariationalAutoencoder(object):
 
         layer_input = x
         last_upper_dim = 0
+        self.batch_size = tf.shape(x)[0]
 
         for idx, (lower_dim, upper_dim) in enumerate(zip(self.encoder_dims[:-1], self.encoder_dims[1:])):
             kernel_upper_dim = upper_dim
@@ -110,9 +112,6 @@ class VariationalAutoencoder(object):
         # Begin Decoding with sampled 'z'
 
         x_hat = self.decoder(z)
-        #dec_mu = self.decoder(z)
-        #dist = tf.distributions.Bernoulli(probs=dec_mu)
-        #x_hat = dist.sample()
 
         KLD = -.5 * tf.reduce_sum(1. + enc_logsd - tf.pow(enc_mu, 2) - tf.exp(enc_logsd), reduction_indices=1)
         CE_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits = x_hat, labels = x), reduction_indices=1)
@@ -142,7 +141,7 @@ class VariationalAutoencoder(object):
 
             dist = tf.distributions.Bernoulli(logits=dec_mu)
             sample = dist.sample()
-            plt.subplot(4, 4, n + 1)
+            plt.subplot(5, 4, n + 1)
             plt.text(
                 0, 1, sampled_latent_variables[n], color='black', backgroundcolor='white', fontsize=8)
             plt.imshow(tf.reshape(sample, shape=[28,28]).eval(), cmap='gray')
@@ -153,8 +152,31 @@ class VariationalAutoencoder(object):
 
         return
 
+    def plot_latent_space(self, idx, minibatch_size):
 
-def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer = 'adam',  learning_rate=0.001, n_epochs=4000,
+        nx = ny = 20
+        x_values = np.linspace(-3, 3, nx)
+        y_values = np.linspace(-3, 3, ny)
+
+        canvas = np.empty((28 * ny, 28 * nx))
+        for i, yi in enumerate(x_values):
+            for j, xi in enumerate(y_values):
+                z_mu = np.array([[xi, yi]] * minibatch_size)
+                dist = tf.distributions.Bernoulli(logits=z_mu)
+                sample = dist.sample()
+                x_mean = self.decoder(tf.cast(sample, dtype=tf.float32))
+                canvas[(nx - i - 1) * 28:(nx - i) * 28, j * 28:(j + 1) * 28] = tf.reshape(x_mean[0],
+                                                                                          shape=(28, 28)).eval()
+
+        plt.figure(figsize=(8, 10))
+        Xi, Yi = np.meshgrid(x_values, y_values)
+        plt.imshow(canvas, origin="upper", cmap="gray")
+        plt.tight_layout()
+        plt.savefig('./Latent_Space_%s.png' % str(idx))
+        plt.close()
+
+
+def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='adam', learning_rate=0.001, n_epochs=5,
         test_every=100, minibatch_size=100, encoder_hidden_sizes=[200, 200], decoder_hidden_sizes=[200, 200],
         hidden_activation='relu', plot_grid_size=10, plot_n_samples = 20):
     """
@@ -207,9 +229,9 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer =
                       .format(datetime.now().strftime("%Y-%m-%d %H:%M"), i + 1,
                               int(n_steps), minibatch_size, tr_loss, te_loss))
 
-
                 # Sample outputs
-                vae.sample(16, i)
+                vae.sample(plot_n_samples, i)
+        vae.plot_latent_space(i, minibatch_size)
 
 if __name__ == '__main__':
     train_vae_on_mnist()
