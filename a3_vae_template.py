@@ -10,6 +10,8 @@ os.makedirs(SUMMARY_PATH, exist_ok=True)
 IMG_DIR = './plots/'
 os.makedirs(IMG_DIR, exist_ok=True)
 
+IDENTIFIER = "VAE"
+
 def load_mnist_images(binarize=True):
     """
     :param binarize: Turn the images into binary vectors
@@ -38,7 +40,7 @@ class VariationalAutoencoder(object):
         self.encoder_dims = np.append(784, encoder_hidden_sizes)
         self.decoder_dims = np.append(self.z_dim, decoder_hidden_sizes)
 
-        self.path = IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
+        self.path = IMG_DIR + IDENTIFIER + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
         os.makedirs(IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M"), exist_ok=True)
 
     def _linear_layer(self, x, kernel_lower_dim, kernel_upper_dim, scope=None):
