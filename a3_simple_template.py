@@ -2,6 +2,15 @@ import tensorflow as tf
 from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+
+SUMMARY_PATH = "./summaries/"
+os.makedirs(SUMMARY_PATH, exist_ok=True)
+
+IMG_DIR = './plots/'
+os.makedirs(IMG_DIR, exist_ok=True)
+
+IDENTIFIER = "NB"
 
 OPTIMIZER_DICT = {'sgd': tf.train.GradientDescentOptimizer,  # Gradient Descent
                   'adadelta': tf.train.AdadeltaOptimizer,  # Adadelta
@@ -9,9 +18,6 @@ OPTIMIZER_DICT = {'sgd': tf.train.GradientDescentOptimizer,  # Gradient Descent
                   'adam': tf.train.AdamOptimizer,  # Adam
                   'rmsprop': tf.train.RMSPropOptimizer  # RMSprop
                   }
-
-FLAGS = None
-
 
 def load_mnist_images(binarize=True):
     """
@@ -53,6 +59,9 @@ class NaiveBayesModel(object):
         self.n_categories = w_init[0]
         self.n_dims = w_init[1]
         self.n_labels = w_init[0]
+
+        self.path = IMG_DIR + IDENTIFIER + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
+        os.makedirs(IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M"), exist_ok=True)
 
     def log_p_x_given_z(self, x, z=None):
         """
@@ -115,6 +124,35 @@ class NaiveBayesModel(object):
         plt.savefig('./NB_%s.png' % str(i))
         plt.close()
 
+    def sample_K_latent_variables(self):
+
+        prob = tf.sigmoid(self.w + self.c)
+        samples = np.zeros((self.n_categories, self.n_dims))
+        sampled_latent_variables = list()
+
+        for n in range(self.n_categories):
+            # Sample a random latent state
+            z = n
+            sampled_latent_variables.append(z)
+
+            # Extract Bernoulli Pixel distribution for sampled latent variable.
+            dist = tf.distributions.Bernoulli(probs=prob[z])
+            samples[n] = dist.sample(1).eval()
+
+        return samples, sampled_latent_variables
+
+    def plot_K_samples(self, samples, sampled_latent_variables, i):
+
+        plt.figure()
+        for idx in range(samples.shape[0]):
+            plt.subplot(5, 5, idx + 1)
+            plt.text(
+                0, 1, sampled_latent_variables[idx], color='black', backgroundcolor='white', fontsize=8)
+            plt.imshow(samples[idx].reshape(28, 28), cmap='gray')
+            plt.axis('off')
+        plt.savefig('./K_NB_%s.png' % str(i))
+        plt.close()
+
     def train_step(self, loss, flags):
 
         optimizer = flags[0]
@@ -125,7 +163,8 @@ class NaiveBayesModel(object):
         return train_step
 
 
-def train_simple_generative_model_on_mnist(n_categories=20, initial_mag=0.01, optimizer='rmsprop', learning_rate=.01, n_epochs=20, test_every=100,
+def train_simple_generative_model_on_mnist(n_categories=20, initial_mag=0.01, optimizer='rmsprop', learning_rate=.01,
+                                           n_epochs=20, test_every=1000,
                                            minibatch_size=100, plot_n_samples=16):
     """
     Train a simple Generative model on MNIST and plot the results.
@@ -165,25 +204,38 @@ def train_simple_generative_model_on_mnist(n_categories=20, initial_mag=0.01, op
 
         sess.run(train_iterator.initializer)
         sess.run(tf.global_variables_initializer())
+
+        # Summary Variables
+        summary = tf.summary.FileWriter(SUMMARY_PATH, sess.graph)
+        train_loss_op = tf.summary.scalar('train_loss', train_loss)
+        test_loss_op = tf.summary.scalar('test_loss', test_loss)
+
         n_steps = (n_epochs * n_samples) / minibatch_size
         loss_list = list()
 
         for i in range(int(n_steps)):
 
-            _, tr_loss = sess.run([train_step, train_loss])
+            _, tr_loss, summary_train_loss = sess.run([train_step, train_loss, train_loss_op])
 
             if i % test_every == 0:
 
                 # Determine Test Loss
-                te_loss = sess.run([test_loss])
+                te_loss, summary_test_loss = sess.run([test_loss, test_loss_op])
                 print("[{}] Train Step {:04d}/{:04d}, Batch Size = {}, Training Loss = {} , Test Loss = {}"
                       .format(datetime.now().strftime("%Y-%m-%d %H:%M"), i + 1,
                               int(n_steps), minibatch_size, tr_loss, te_loss))
 
-                # Sample outputs
+            # Sample outputs
+            if i % 2000 == 0:
                 samples, sampled_latent_variables = nb.sample(plot_n_samples)
                 nb.plot_samples(samples, sampled_latent_variables, i)
 
+                # Sample outputs for K latent states
+                samples, sampled_latent_variables = nb.sample_K_latent_variables()
+                nb.plot_K_samples(samples, sampled_latent_variables, i)
+
+            summary.add_summary(summary_train_loss, i)
+            summary.add_summary(summary_test_loss, i)
 
 if __name__ == '__main__':
     train_simple_generative_model_on_mnist()
