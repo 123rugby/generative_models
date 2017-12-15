@@ -2,6 +2,13 @@ import tensorflow as tf
 from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+
+SUMMARY_PATH = "./summaries/"
+os.makedirs(SUMMARY_PATH, exist_ok=True)
+
+IMG_DIR = './plots/'
+os.makedirs(IMG_DIR, exist_ok=True)
 
 def load_mnist_images(binarize=True):
     """
@@ -30,6 +37,9 @@ class VariationalAutoencoder(object):
         self.weight_initializer = tf.variance_scaling_initializer()
         self.encoder_dims = np.append(784, encoder_hidden_sizes)
         self.decoder_dims = np.append(self.z_dim, decoder_hidden_sizes)
+
+        self.path = IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
+        os.makedirs(IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M"), exist_ok=True)
 
     def _linear_layer(self, x, kernel_lower_dim, kernel_upper_dim, scope=None):
 
@@ -147,7 +157,8 @@ class VariationalAutoencoder(object):
             plt.imshow(tf.reshape(sample, shape=[28,28]).eval(), cmap='gray')
             plt.axis('off')
 
-        plt.savefig('./VAE_%s.png' % str(idx))
+        # plt.savefig('./VAE_%s.png' % str(idx))
+        plt.savefig(self.path + 'VAE_%s.png' % str(idx))
         plt.close()
 
         return
@@ -198,9 +209,14 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
 
     # Get Data
     x_train, x_test = load_mnist_images(binarize=True)
+
     train_iterator = tf.data.Dataset.from_tensor_slices(x_train).repeat().batch(minibatch_size).make_initializable_iterator()
     n_samples, n_dims = x_train.shape
     x_minibatch = train_iterator.get_next()  # Get symbolic data, target tensors
+
+    test_iterator = tf.data.Dataset.from_tensor_slices(x_test).repeat().batch(
+        minibatch_size).make_initializable_iterator()
+    x_test_minibatch = test_iterator.get_next()  # Get symbolic data, target tensors
 
     # Build the model
     vae = VariationalAutoencoder(encoder_hidden_sizes=encoder_hidden_sizes,
@@ -208,29 +224,41 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
                                  z_dim=z_dim)
 
     # Build Graph
-    train_loss, train_ELBO = vae.inference_network(x_minibatch)
+    train_x_hat, train_ELBO = vae.inference_network(x_minibatch)
+    test_x_hat, test_ELBO = vae.inference_network(x_test_minibatch)
     train_step = vae.train_step(learning_rate, train_ELBO)
 
+    #_, training_loss, summary_acc, summary_loss = sess.run([apply_gradients_op, loss, tacc, tloss], feed_dict=feed_data)
     with tf.Session() as sess:
 
         sess.run(train_iterator.initializer)
+        sess.run(test_iterator.initializer)
         sess.run(tf.global_variables_initializer())
+
+        # Summary Variables
+        summary = tf.summary.FileWriter(SUMMARY_PATH, sess.graph)
+        train_lb = tf.summary.scalar('train_ELBO', train_ELBO)
+        test_lb = tf.summary.scalar('test_ELBO', test_ELBO)
+
         n_steps = (n_epochs * n_samples) / minibatch_size
         loss_list = list()
 
         for i in range(int(n_steps)):
 
-            _, tr_loss = sess.run([train_step, train_ELBO])
+            _, tr_loss, summary_train_lb = sess.run([train_step, train_ELBO, train_lb])
             if i % test_every == 0:
                 # Determine Test Loss
-                #te_loss = sess.run([test_loss])
-                te_loss = 0.0
+                te_loss = test_ELBO.eval()
+                summary_test_lb = test_lb.eval()
                 print("[{}] Train Step {:04d}/{:04d}, Batch Size = {}, ELBO = {} , Test Loss = {}"
                       .format(datetime.now().strftime("%Y-%m-%d %H:%M"), i + 1,
                               int(n_steps), minibatch_size, tr_loss, te_loss))
 
                 # Sample outputs
                 vae.sample(plot_n_samples, i)
+
+            summary.add_summary(summary_train_lb, i)
+            summary.add_summary(summary_test_lb, i)
         vae.plot_latent_space(i, minibatch_size)
 
 if __name__ == '__main__':
