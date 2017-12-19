@@ -1,5 +1,8 @@
 import tensorflow as tf
 from datetime import datetime
+import matplotlib
+
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -10,7 +13,6 @@ os.makedirs(SUMMARY_PATH, exist_ok=True)
 IMG_DIR = './plots/'
 os.makedirs(IMG_DIR, exist_ok=True)
 
-IDENTIFIER = "VAE"
 
 def load_mnist_images(binarize=True):
     """
@@ -24,14 +26,14 @@ def load_mnist_images(binarize=True):
     x_train = mnist.train.images
     x_test = mnist.test.images
     if binarize:
-        x_train = (x_train>0.5).astype(x_train.dtype)
-        x_test = (x_test>0.5).astype(x_test.dtype)
+        x_train = (x_train > 0.5).astype(x_train.dtype)
+        x_test = (x_test > 0.5).astype(x_test.dtype)
     return x_train, x_test
 
 
 class VariationalAutoencoder(object):
 
-    def __init__(self,encoder_hidden_sizes, decoder_hidden_sizes,z_dim):
+    def __init__(self, encoder_hidden_sizes, decoder_hidden_sizes, z_dim):
 
         self.ELBO = 0.0
         self.z_dim = z_dim
@@ -40,8 +42,9 @@ class VariationalAutoencoder(object):
         self.encoder_dims = np.append(784, encoder_hidden_sizes)
         self.decoder_dims = np.append(self.z_dim, decoder_hidden_sizes)
 
-        self.path = IMG_DIR + IDENTIFIER + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
-        os.makedirs(IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M"), exist_ok=True)
+        self.path = IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M") + '/'
+        os.makedirs(
+            IMG_DIR + datetime.now().strftime("%Y-%m-%d %H:%M"), exist_ok=True)
 
     def _linear_layer(self, x, kernel_lower_dim, kernel_upper_dim, scope=None):
 
@@ -81,8 +84,10 @@ class VariationalAutoencoder(object):
 
         # Output for Last Layer
 
-        enc_mu = self._linear_layer(layer_input, last_upper_dim, self.z_dim, 'enc_mu')
-        enc_logsd = self._linear_layer(layer_input, last_upper_dim, self.z_dim, 'enc_logsd')
+        enc_mu = self._linear_layer(
+            layer_input, last_upper_dim, self.z_dim, 'enc_mu')
+        enc_logsd = self._linear_layer(
+            layer_input, last_upper_dim, self.z_dim, 'enc_logsd')
 
         return enc_mu, enc_logsd
 
@@ -125,8 +130,10 @@ class VariationalAutoencoder(object):
 
         x_hat = self.decoder(z)
 
-        KLD = -.5 * tf.reduce_sum(1. + enc_logsd - tf.pow(enc_mu, 2) - tf.exp(enc_logsd), reduction_indices=1)
-        CE_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits = x_hat, labels = x), reduction_indices=1)
+        KLD = -.5 * tf.reduce_sum(1. + enc_logsd - tf.pow(enc_mu, 2) -
+                                  tf.exp(enc_logsd), reduction_indices=1)
+        CE_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=x_hat, labels=x), reduction_indices=1)
 
         self.ELBO = -tf.reduce_mean(KLD + CE_loss)
         return x_hat, self.ELBO
@@ -145,18 +152,18 @@ class VariationalAutoencoder(object):
 
         for n in range(n_samples):
             # Sample a random latent state
-            z = tf.random_normal(shape=[1,2])
+            z = tf.random_normal(shape=[1, 2])
             sampled_latent_variables.append(z)
 
             # Extract Bernoulli Pixel distribution for sampled latent variable.
             dec_mu = self.decoder(z)
 
-            dist = tf.distributions.Bernoulli(logits=dec_mu)
+            dist = tf.distributions.Bernoulli(probs=dec_mu)
             sample = dist.sample()
             plt.subplot(5, 4, n + 1)
             plt.text(
-                0, 1, sampled_latent_variables[n], color='black', backgroundcolor='white', fontsize=8)
-            plt.imshow(tf.reshape(sample, shape=[28,28]).eval(), cmap='gray')
+                0, 1, n, color='black', backgroundcolor='white', fontsize=8)
+            plt.imshow(tf.reshape(sample, shape=[28, 28]).eval(), cmap='gray')
             plt.axis('off')
 
         # plt.savefig('./VAE_%s.png' % str(idx))
@@ -175,9 +182,9 @@ class VariationalAutoencoder(object):
         for i, yi in enumerate(x_values):
             for j, xi in enumerate(y_values):
                 z_mu = np.array([[xi, yi]] * minibatch_size)
-                dist = tf.distributions.Bernoulli(logits=z_mu)
-                sample = dist.sample()
-                x_mean = self.decoder(tf.cast(sample, dtype=tf.float32))
+                # dist = tf.distributions.Bernoulli(logits=z_mu)
+                # sample = dist.sample()
+                x_mean = tf.sigmoid(self.decoder(tf.cast(z_mu, dtype=tf.float32)))
                 canvas[(nx - i - 1) * 28:(nx - i) * 28, j * 28:(j + 1) * 28] = tf.reshape(x_mean[0],
                                                                                           shape=(28, 28)).eval()
 
@@ -189,9 +196,10 @@ class VariationalAutoencoder(object):
         plt.close()
 
 
-def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='adam', learning_rate=0.001, n_epochs=5,
-        test_every=100, minibatch_size=100, encoder_hidden_sizes=[200, 200], decoder_hidden_sizes=[200, 200],
-        hidden_activation='relu', plot_grid_size=10, plot_n_samples = 20):
+def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='adam', learning_rate=0.001, n_epochs=20,
+                       test_every=1000, minibatch_size=100, encoder_hidden_sizes=[200, 200],
+                       decoder_hidden_sizes=[200, 200],
+                       hidden_activation='relu', plot_grid_size=10, plot_n_samples=20):
     """
     Train a variational autoencoder on MNIST and plot the results.
 
@@ -212,7 +220,8 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
     # Get Data
     x_train, x_test = load_mnist_images(binarize=True)
 
-    train_iterator = tf.data.Dataset.from_tensor_slices(x_train).repeat().batch(minibatch_size).make_initializable_iterator()
+    train_iterator = tf.data.Dataset.from_tensor_slices(
+        x_train).repeat().batch(minibatch_size).make_initializable_iterator()
     n_samples, n_dims = x_train.shape
     x_minibatch = train_iterator.get_next()  # Get symbolic data, target tensors
 
@@ -230,7 +239,7 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
     test_x_hat, test_ELBO = vae.inference_network(x_test_minibatch)
     train_step = vae.train_step(learning_rate, train_ELBO)
 
-    #_, training_loss, summary_acc, summary_loss = sess.run([apply_gradients_op, loss, tacc, tloss], feed_dict=feed_data)
+
     with tf.Session() as sess:
 
         sess.run(train_iterator.initializer)
@@ -247,7 +256,8 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
 
         for i in range(int(n_steps)):
 
-            _, tr_loss, summary_train_lb = sess.run([train_step, train_ELBO, train_lb])
+            _, tr_loss, summary_train_lb = sess.run(
+                [train_step, train_ELBO, train_lb])
             if i % test_every == 0:
                 # Determine Test Loss
                 te_loss = test_ELBO.eval()
@@ -261,7 +271,10 @@ def train_vae_on_mnist(z_dim=2, kernel_initializer='glorot_uniform', optimizer='
 
             summary.add_summary(summary_train_lb, i)
             summary.add_summary(summary_test_lb, i)
+
+
         vae.plot_latent_space(i, minibatch_size)
+
 
 if __name__ == '__main__':
     train_vae_on_mnist()

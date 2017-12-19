@@ -162,7 +162,7 @@ class NaiveBayesModel(object):
 
 
 def train_simple_generative_model_on_mnist(n_categories=20, initial_mag=0.01, optimizer='rmsprop', learning_rate=.01,
-                                           n_epochs=500, test_every=100,
+                                           n_epochs=10, test_every=100,
                                            minibatch_size=100, plot_n_samples=16):
     """
     Train a simple Generative model on MNIST and plot the results.
